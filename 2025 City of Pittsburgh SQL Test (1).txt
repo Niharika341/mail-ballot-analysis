@@ -1,0 +1,99 @@
+-- Task #1
+-- Return all the fields from 20 records 
+SELECT TOP 20 *
+FROM dbo.flights_trunc;
+
+
+-- How would you rate the efficiency of the code in terms of the number of records queried? 
+
+The query SELECT TOP 20 * FROM dbo.flights_trunc has a high efficiency rating because it retrieves only 20 records, regardless of the total size of the dataset. 
+SQL Server optimizes this type of query by stopping the scan as soon as the required number of rows is fetched, which minimizes resource usage.
+Since there are no filtering conditions or joins involved, the operation is lightweight and fast. However, if an ORDER BY clause were included,
+SQL Server would need to sort the entire dataset before returning the top 20 rows, which would increase the processing cost significantly.
+
+
+ -- Return all of the destination airports and the corresponding arrival time where the take off time was before 11AM (ignore timezones)  
+SELECT DESTINATION_AIRPORT, ARRIVAL_TIME
+FROM dbo.flights_trunc
+WHERE WHEELS_OFF < '11:00:00';
+
+
+-- What is the longest flight time? 
+SELECT MAX(AIR_TIME) AS LongestFlightTime
+FROM dbo.flights_trunc;
+
+-- How many different airlines are in the dataset?
+SELECT COUNT(DISTINCT AIRLINE) AS UniqueAirlines
+FROM dbo.flights_trunc;
+
+
+--Task #2 
+
+WITH ConvertedTimes AS (
+    SELECT
+        DESTINATION_AIRPORT,
+        CAST(AIR_TIME AS FLOAT) AS AIR_TIME,
+        CAST(ARRIVAL_DELAY AS FLOAT) AS ARRIVAL_DELAY,
+        CAST(DISTANCE AS FLOAT) AS DISTANCE,
+        CAST(DATEDIFF(MINUTE, '00:00:00', ARRIVAL_TIME) AS FLOAT) AS ARRIVAL_TIME_MIN
+    FROM dbo.flights_trunc
+    WHERE AIR_TIME IS NOT NULL 
+      AND ARRIVAL_DELAY IS NOT NULL
+      AND ARRIVAL_TIME IS NOT NULL
+      AND DISTANCE IS NOT NULL
+)
+SELECT TOP 5
+    DESTINATION_AIRPORT,
+    COUNT(*) AS flight_count,
+    AVG(AIR_TIME) AS avg_air_time,
+
+    -- Correlation between arrival_delay and air_time
+    (AVG(ARRIVAL_DELAY * AIR_TIME) - AVG(ARRIVAL_DELAY) * AVG(AIR_TIME)) /
+    (STDEV(ARRIVAL_DELAY) * STDEV(AIR_TIME)) AS corr_arrivaldelay_airtime,
+
+    -- Correlation between distance and arrival_time (in minutes)
+    (AVG(DISTANCE * ARRIVAL_TIME_MIN) - AVG(DISTANCE) * AVG(ARRIVAL_TIME_MIN)) /
+    (STDEV(DISTANCE) * STDEV(ARRIVAL_TIME_MIN)) AS corr_distance_arrivaltime
+
+FROM ConvertedTimes
+GROUP BY DESTINATION_AIRPORT
+ORDER BY flight_count DESC;
+
+-- Task #3
+
+--1. Would your data model be efficient for real-time writes? Why or why not?
+In this case, no, the current model would not be ideal for real-time writes if optimized purely for analytical querying.
+For this historical dataset, I would create a denormalized, columnstore-indexed table or even use a star schema for read-heavy analytical workloads. 
+These structures support excellent read performance, compression, and scan efficiency, but they sacrifice write performance — especially in real-time inserts, 
+where columnstore indexes require rowgroup compressions and bulk operations.
+In a real-time environment, an OLTP-optimized model (normalized schema with rowstore indexes, partitioning, and minimal locking overhead) would be better for efficient inserts and updates. 
+So while my analytical model is excellent for read efficiency in historical analysis, it would be inefficient for write-heavy, near-real-time systems.
+
+
+--2. Would you recommend NoSQL for this dataset? Why or why not?
+No, I would not recommend NoSQL for this dataset.
+
+This dataset has a structured, tabular format with strong relational integrity (e.g., dates, airlines, flight numbers, delays), making it well-suited for relational databases like SQL Server or Snowflake. 
+The typical queries involve aggregations, joins, time-series comparisons, and statistical analysis, which are better handled by SQL databases due to:
+
+1. Mature query optimization
+
+2. ACID guarantees for transactional consistency
+
+3. Rich support for window functions, grouping sets, and time-based operations
+
+NoSQL systems (like MongoDB or Cassandra) excel with semi-structured or hierarchical data, low-latency key-value access, or horizontal scale-out. 
+For this flat, analytical, time-based dataset, SQL remains the better choice.
+
+
+--3. Data Type Assessment for the Given Columns
+
+For the columns YEAR, MONTH, DAY, and DAY_OF_WEEK, using the INT data type is appropriate and should be retained. 
+These fields are numeric, discrete, and have low cardinality, making them well-suited for indexing, filtering, and partitioning in analytical queries. 
+The AIRLINE column, which typically contains 2 or 3character IATA codes, is likely defined as VARCHAR, which is acceptable.
+however, changing it to CHAR(2) or CHAR(3) could slightly improve performance and storage efficiency due to its fixed width. 
+The FLIGHT_NUMBER column can remain an INT if it only contains numeric values, but if the flight numbers include leading zeros or follow a specific format that must be preserved (e.g., "0123"),
+it would be more appropriate to store it as a VARCHAR. Finally, the TAIL_NUMBER column, which contains alphanumeric aircraft identifiers like "N947WN",
+should remain as VARCHAR(10) or CHAR(n) depending on the consistency of length. 
+If all values are fixed in length (e.g., always six characters), defining it as CHAR(6) would be optimal.
+
